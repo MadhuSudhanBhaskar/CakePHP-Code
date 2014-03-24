@@ -1,0 +1,1904 @@
+<?php
+	class ScArticleCategoriesController extends AppController
+	{
+		var $name='ScArticleCategories';
+		var $helpers = array('Html', 'Javascript', 'Ajax','Time','Session','Form','Ajax','Javascript');
+		var $components = array('RequestHandler'); 
+		var $uses=array('ScArticleCategorie','ScUsers','ScArticle','ScLeadformLabel','ScNewsletterSubscriber','ScLeadformSublabel','ScLeadsExtend','ScProvidersMaster','ScLeadsInfo');
+		
+		/*This is to authenticate that the admin is logged in ir-respective of tab*/
+		public function admin_authenticate()
+		{
+			if(!$this->Session->check('AdminId'))
+			{
+				 $this->redirect(array('../../admin'));
+			}
+		}
+
+		/* Log out the user if he is idle for 60 minutes */
+		function idleTimeOut()
+		{
+			$idletime=3600;//after 3600 seconds(60 minutes) idle the user gets logged out
+			if($this->Session->read('timestamp'))
+			{
+				//echo $idletime; echo "<br>";
+				$curtime = time();
+				$prevtime = $this->Session->read('timestamp');
+
+				if(($curtime - $prevtime) > $idletime)
+				{
+					
+				if(isset($_SESSION['AdminId']))
+					{
+					unset($_SESSION['AdminId']);
+					unset($_SESSION['AFName']);
+					unset($_SESSION['ALName']);
+					unset($_SESSION['User']);
+					$this->redirect(array('/admin'));
+					}
+				if(isset($_SESSION['BuyerId']))
+					{
+					unset($_SESSION['BuyerId']);
+					unset($_SESSION['BFName']);
+					unset($_SESSION['BLName']);
+					unset($_SESSION['Buyer']);
+					unset($_SESSION['Amount']);
+					unset($_SESSION['RString']);
+					$this->redirect(array('/buyer'));
+					}
+				}
+				else
+				{
+					$this->Session->write('timestamp',$curtime);
+				}
+				
+			}
+		 /* Store The Logged Time In Session */
+		}
+
+		/*This is used to see if the particular article category and subcategory session is deleted on
+		each load so that there would be no conflict's*/
+		function editartical_aut()
+		{
+			if($this->Session->check('subcatsession'))
+			{
+				unset($_SESSION['subcatsession']);
+				$this->Session->delete('subcatsession');
+			}
+		}
+		/*This will take to the contentmanagment widget page*/
+		function contentmanagement()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+
+			/* Clear the session set in Report and Lead Management page in admin section */
+			$this->Session->write('From','');
+			$this->Session->write('To','');
+			$this->Session->write('Services','0');
+			$this->Session->write('RpFrom','');
+			$this->Session->write('RpTo','');
+			$this->Session->write('RpServices','0');
+			/* Clear the session set in Report and Lead Management page in admin section */
+
+			$data=$this->ScArticleCategorie->query('select DISTINCT(Menu_Cat_Name) from sc_menu_cms');
+			$this->set('datas',$data);
+		}
+
+		/*This is the function to add the Category and Sub-Category*/
+		function articlepage()
+		{			
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$category=$this->ScArticleCategorie->query('select Id,Name from sc_article_categories where Sublevel=0');
+			if(count($category)>0)
+			{
+				//This is the rootdata filter this rootdata to single array
+				$rootdata=$this->ScArticleCategorie->query('select Id,Name,SubLevel,Level from sc_article_categories order by SubLevel,Id asc');
+				$finalarray=array();
+				$levcmpid='';//Var to Compare the ID
+				for($i=0;$i<count($rootdata);$i++)
+				{
+					$levcmpid=$rootdata[$i]['sc_article_categories']['Id'];
+					if($rootdata[$i]['sc_article_categories']['SubLevel']==0)
+					{
+						//Push Only if sublevel is a root(Parent)
+						array_push($finalarray,$rootdata[$i]);
+					}
+					for($j=$i;$j<count($rootdata);$j++)
+					{
+						$lefid=$rootdata[$j]['sc_article_categories']['SubLevel'];
+						if($lefid==$levcmpid && $rootdata[$j]['sc_article_categories']['Level']==0)
+						{
+							//Push Only if the sublevel is a child continue till it finds a child
+							array_push($finalarray,$rootdata[$j]);
+						}
+					}
+				}
+				$this->set('listcatalog',$finalarray);
+			}
+			$this->set('catname',$category);
+		}
+		
+		/*This function is to add the category here we add 0(zero) as a level
+		indicating it as a ROOT category.The JSON true is returned*/
+		function addcat()
+		{			
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='ajax';
+			$this->autoLayout = false;
+			$this->autoRender = false;
+			$response=array('success'=>false);
+			if(!empty($_POST['cat-sub']))
+			{
+				if($_POST['drp']==0)
+				{
+					$this->ScArticleCategorie->query('insert into sc_article_categories(Name,Level,SubLevel,Created_dt,Modified_dr) values("'.$_POST['cat-sub'].'","0","0",now(),now())');
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query('insert into sc_article_categories(Name,Level,SubLevel,Created_dt,Modified_dr) values("'.$_POST['cat-sub'].'","0","'.$_POST['drp'].'",now(),now())');
+					$response['success']=true;
+
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			echo (json_encode($response));
+			header('Content-type: application/json');
+		}
+
+		/*This is to delete the subcategory.This will delete from database and refresh the whole page*/
+		function deletsubcat()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['id']))
+			{
+				$subdata=$this->ScArticleCategorie->query('select Sublevel from sc_article_categories WHERE Id="'.$_POST['id'].'"');
+				if($subdata[0]['sc_article_categories']['Sublevel']!=0)
+				{
+					$this->ScArticleCategorie->query('DELETE FROM sc_article_categories WHERE Id="'.$_POST['id'].'"');
+					$a=$_POST['id'].',';
+					$this->ScArticleCategorie->query(
+					'update sc_articles set SubCategories_Id = replace(SubCategories_Id, "'.$a.'" ,"")');
+					$this->ScArticleCategorie->query(
+					'update sc_articles set SubCategories_Id = replace(SubCategories_Id, "'.$_POST['id'].'" ,"")');
+					$response['success']=true;
+				}
+				{
+					$subdatarepos=$this->ScArticleCategorie->query('select Id from sc_article_categories WHERE Sublevel="'.$_POST['id'].'"');
+					$rrt=count($subdatarepos);
+					$this->ScArticleCategorie->query('DELETE FROM sc_article_categories WHERE Id="'.$_POST['id'].'"');
+					$this->ScArticleCategorie->query('DELETE FROM sc_article_categories WHERE Sublevel="'.$_POST['id'].'"');
+					$a=$_POST['id'].',';
+					$a1=','.$_POST['id'];
+					$this->ScArticleCategorie->query(
+					'update sc_articles set Categories_Id = replace(Categories_Id, "'.$a1.'" ,"")');
+					$this->ScArticleCategorie->query(
+					'update sc_articles set Categories_Id = replace(Categories_Id, "'.$a.'" ,"")');
+					$this->ScArticleCategorie->query(
+					'update sc_articles set Categories_Id = replace(Categories_Id, "'.$_POST['id'].'" ,"")');
+					for($i=0;$i<$rrt;$i++)
+					{
+						$re=$subdatarepos[$i]["sc_article_categories"]['Id'].',';
+						$re1=','.$subdatarepos[$i]["sc_article_categories"]['Id'];
+						$datarr=$this->ScArticleCategorie->query(
+						'update sc_articles set SubCategories_Id = replace(SubCategories_Id, "'.$re1.'" ,"")');
+						$datarr=$this->ScArticleCategorie->query(
+						'update sc_articles set SubCategories_Id = replace(SubCategories_Id, "'.$re.'" ,"")');
+						$datarr=$this->ScArticleCategorie->query(
+						'update sc_articles set SubCategories_Id = replace(SubCategories_Id, "'.$subdatarepos[$i]["sc_article_categories"]['Id'].'" ,"")');
+					}
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		
+		/*This is the for the article page.This will redirect to the article page from the catagory
+		and subcatogry page*/
+		function article()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+
+			$this->paginate['ScArticle']=array('limit' => 50
+			,'order'=> array('ScArticle.Created_dt desc'));
+			$data = $this->paginate('ScArticle'); 
+
+			$this->set('images',$data);
+		}
+
+		/*This is the function to add the article.Here the category is selected to get the respective subcategory,
+		if the subcategory is not selected the article belongs to the category.If sub cat selected the id is stored as category_subcategory*/
+		function addarticle()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$category=$this->ScArticleCategorie->query('select Id,Name from sc_article_categories where Sublevel=0');
+			$this->set('catname',$category);
+		}
+
+		function copyarticle()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+
+			if($_POST['id']!="")
+			{
+				$id2=base64_decode($_POST['id']);
+				$details=$this->ScArticleCategorie->query('select * from sc_articles where Id='.$id2.'');
+
+				$catId = $details[0]['sc_articles']['Categories_Id'];
+				$subcatId = $details[0]['sc_articles']['SubCategories_Id'];
+				$title = "copy_".$details[0]['sc_articles']['Title'];
+				$desc = $details[0]['sc_articles']['Description'];
+				$metatag = $details[0]['sc_articles']['Meta_tags'];
+				$metakey = $details[0]['sc_articles']['Meta_keyword'];
+				$articletitle = $details[0]['sc_articles']['Article_Title'];
+				$created = $details[0]['sc_articles']['Created_dt'];
+				$modified = $details[0]['sc_articles']['Modified_dt'];
+			
+				$this->ScArticleCategorie->query('insert into sc_articles(Categories_Id,SubCategories_Id,Title,Description,Meta_tags,Meta_keyword,Created_dt,Modified_dt,Article_Title) values("'.addslashes($catId).'","'.addslashes($subcatId).'","'.addslashes($title).'","'.addslashes($desc).'","'.addslashes($metatag).'","'.addslashes($metakey).'","'.$created.'","'.$modified.'","'.addslashes($articletitle).'")');
+				$response['success']=true;
+			}
+
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		/*This function is to get all the subcategory of selected category*/
+		function getsubcategory()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			$subcat=array();
+			if(!empty($_POST['id']))
+			{
+				$idarray=explode(',',$_POST['id']);
+				for($i=0;$i<count($idarray);$i++)
+				{
+					if($idarray[$i]!=0 && $idarray[$i]!=0)
+					{
+						$getcat=$this->ScArticleCategorie->query('SELECT a.Id, a.Name, b.Id,b.Name as tet 
+						FROM sc_article_categories as a 
+						INNER JOIN sc_article_categories as b 
+						on(a.Sublevel='.$idarray[$i].') and b.Id='.$idarray[$i].' group by a.ID');
+						array_push($subcat,$getcat);
+						
+					}
+				}
+				$response['data']=$subcat;
+				$response['success']=true;
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+
+		/*
+		This is to save the posted article.There are 2 ways literally 2types of post.
+		1st-If the subcategory is selected then it shud go with and _ ie(category_subcategory) and it shud 
+		run based on count of subcategory and not category
+		2nd-If the subcategory is not selected then simply insert the category as id.
+		So before inserting we have to check these conditions.Once the data is inserted the page will be redirected 
+		to the article page.Where we list all the articles POSTED.
+		*/
+		function submitarticle()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			//echo'<pre>';var_dump($_POST);echo'</pre>';exit;
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['drp']))
+			{
+				if(!empty($_POST['sub']))
+				{
+					if(count($_POST['drp'])>0)
+					{
+						$catim=implode(',',$_POST['drp']);
+					}
+					else
+					{
+						$catim=$_POST['drp'];
+					}
+					if(count($_POST['sub'])>0)
+					{
+						$catsubim=implode(',',$_POST['sub']);
+					}
+					else
+					{
+						$catsubim=$_POST['drp'];
+					}
+
+					$artdata=$this->ScArticleCategorie->query('select Id from sc_articles where Article_Title="'.addslashes($_POST['urltit']).'"');
+					if(!empty($artdata[0]['sc_articles']['Id']))
+					{
+						$response['success']=false;
+						$response['data']='tital';
+					}
+					else
+					{
+						$this->ScArticleCategorie->query('insert into sc_articles(Categories_Id,SubCategories_Id,Title,Description,Meta_tags,Meta_keyword,Created_dt,Modified_dt,Article_Title) values("'.addslashes($catim).'","'.addslashes($catsubim).'","'.$_POST['title'].'","'.addslashes($_POST['articletext']).'","'.addslashes($_POST['metatags']).'","'.addslashes($_POST['metakeyword']).'",now(),now(),"'.addslashes($_POST['urltit']).'")');
+						$response['success']=true;
+					}
+				}
+				else
+				{
+					if(count($_POST['drp'])>0)
+					{
+						$catim=implode(',',$_POST['drp']);
+					}
+					else
+					{
+						$catim=$_POST['drp'];
+					}
+					$artdata=$this->ScArticleCategorie->query('select Id from sc_articles where Article_Title="'.addslashes($_POST['urltit']).'"');
+					if(!empty($artdata[0]['sc_articles']['Id']))
+					{
+						$response['success']=false;
+						$response['data']='tital';
+					}
+					else
+					{
+						$this->ScArticleCategorie->query('insert into sc_articles(Categories_Id,SubCategories_Id,Title,Description,Meta_tags,Meta_keyword,Created_dt,Modified_dt,Article_Title) values("'.addslashes($catim).'","0","'.$_POST['title'].'","'.addslashes($_POST['articletext']).'","'.addslashes($_POST['metatags']).'","'.addslashes($_POST['metakeyword']).'",now(),now(),"'.addslashes($_POST['urltit']).'")');
+						$response['success']=true;
+					}
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		/*This function is to edit the article the id is passed to the url.
+		The Title,Description and Category is selected based on ID.Once this is done we see if it has 
+		any subcategory in it,if it has we select all the subcategory of that category and highlight the
+		selected one that is coming from DATABASE.And there again we store the subcategory in sessions for 
+		future use.*/
+		function editarticle($id)
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$id2=base64_decode($id);//echo $id2;exit;
+			$this->layout='adashboard';
+			$details=$this->ScArticleCategorie->query('select Title,Description,SubCategories_Id,Categories_Id,Article_Title,Meta_tags,Meta_keyword from sc_articles where Id='.$id2.'');
+			$category=$this->ScArticleCategorie->query('select Id,Name from sc_article_categories where Sublevel=0');
+			$catcount=explode(',',$details[0]['sc_articles']['Categories_Id']);
+			$ccount=count($catcount);
+			if(!empty($details[0]['sc_articles']['SubCategories_Id']))
+			{
+				$catme=array();
+				for($i=0;$i<$ccount;$i++)
+				{
+					if($catcount[$i]!=',')
+					{
+						$subcatdetail=$this->ScArticleCategorie->query('SELECT a.Id, a.Name, b.Id,b.Name as tet 
+						FROM sc_article_categories as a INNER JOIN sc_article_categories as b on(a.Id='.$catcount[$i].') and b.Sublevel='.$catcount[$i].' group by b.ID');
+						array_push($catme,$subcatdetail);
+					}
+				}
+				$subcatme=explode(',',$details[0]['sc_articles']['SubCategories_Id']);
+				$subcatcount=count($subcatme);
+				$this->set('subcatcontent',$catme);
+				$this->set('subcatid',$subcatme);
+				$this->set('subcatcount',$subcatcount);
+				$this->Session->write('subcatsession',$subcatme);
+				
+			}
+			$this->set('catid',$ccount);
+			$this->set('getme',$id);
+			$this->set('catcount',$catcount);
+			$this->set('formdetails',$details);
+			$this->set('catloglist',$category);
+		}
+
+		/*This function is to get all the subcategory of selected category in the edit section*/
+		function getsubcategoryedit()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			$subcat=array();
+			if(!empty($_POST['id']))
+			{
+				$idarray=explode(',',$_POST['id']);
+				for($i=0;$i<count($idarray);$i++)
+				{
+					if($idarray[$i]!=0 && $idarray[$i]!=0)
+					{
+						$getcat=$this->ScArticleCategorie->query('SELECT a.Id, a.Name, b.Id,b.Name as tet 
+						FROM sc_article_categories as a 
+						INNER JOIN sc_article_categories as b 
+						on(a.Sublevel='.$idarray[$i].') and b.Id='.$idarray[$i].' group by a.ID');
+						array_push($subcat,$getcat);
+						
+					}
+				}
+				$response['sessiondata']=$this->Session->read('subcatsession');
+				$response['data']=$subcat;
+				$response['success']=true;
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+
+		/*This is to edit the update the article.The validations are same as submit article we follow all those things here to.*/
+		function updatearticle()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			$id2=base64_decode($_POST['update']);
+			if(!empty($_POST['drp']))
+			{
+				if(!empty($_POST['sub']))
+				{
+					if(count($_POST['drp'])>0)
+					{
+						$catim=implode(',',$_POST['drp']);
+					}
+					else
+					{
+						$catim=$_POST['drp'];
+					}
+					if(count($_POST['sub'])>0)
+					{
+						$catsubim=implode(',',$_POST['sub']);
+					}
+					else
+					{
+						$catsubim=$_POST['drp'];
+					}
+					if($_POST['urltit']==$_POST['titupdate'])
+					{
+						$this->ScArticleCategorie->query('update sc_articles set Categories_Id="'.addslashes($catim).'",SubCategories_Id="'.addslashes($catsubim).'",Title="'.$_POST['title'].'",Description="'.addslashes($_POST['articletext2']).'",Meta_tags="'.addslashes($_POST['metatags']).'",Meta_keyword="'.addslashes($_POST['metakeyword']).'",Modified_dt=now(),Article_Title="'.$_POST['urltit'].'" where id="'.$id2.'"');
+						$response['success']=true;
+					}
+					else
+					{
+						$artdata=$this->ScArticleCategorie->query('select Id from sc_articles where Article_Title="'.addslashes($_POST['urltit']).'"');
+						if(!empty($artdata[0]['sc_articles']['Id']))
+						{
+							$response['success']=false;
+							$response['data']='tital';
+						}
+						else
+						{
+							$this->ScArticleCategorie->query('update sc_articles set Categories_Id="'.addslashes($catim).'",SubCategories_Id="'.addslashes($catsubim).'",Title="'.$_POST['title'].'",Description="'.addslashes($_POST['articletext2']).'",Meta_tags="'.addslashes($_POST['metatags']).'",Meta_keyword="'.addslashes($_POST['metakeyword']).'",Modified_dt=now(),Article_Title="'.$_POST['urltit'].'" where id="'.$id2.'"');
+							$response['success']=true;
+						}
+					}
+				}
+				else
+				{
+					if(count($_POST['drp'])>0)
+					{
+						$catim=implode(',',$_POST['drp']);
+					}
+					else
+					{
+						$catim=$_POST['drp'];
+					}
+					if($_POST['urltit']==$_POST['titupdate'])
+					{
+						$this->ScArticleCategorie->query('update sc_articles set Categories_Id="'.addslashes($catim).'",SubCategories_Id="0",Title="'.$_POST['title'].'",Description="'.addslashes($_POST['articletext2']).'",Meta_tags="'.addslashes($_POST['metatags']).'",Meta_keyword="'.addslashes($_POST['metakeyword']).'",Modified_dt=now(),Article_Title="'.$_POST['urltit'].'" where id="'.$id2.'"');
+						$response['success']=true;
+						$this->editartical_aut();
+					}
+					else
+					{
+						$artdata=$this->ScArticleCategorie->query('select Id from sc_articles where Article_Title="'.addslashes($_POST['urltit']).'"');
+						if(!empty($artdata[0]['sc_articles']['Id']))
+						{
+							$response['success']=false;
+							$response['data']='tital';
+						}
+						else
+						{
+							$this->ScArticleCategorie->query('update sc_articles set Categories_Id="'.addslashes($catim).'",SubCategories_Id="0",Title="'.$_POST['title'].'",Description="'.addslashes($_POST['articletext2']).'",Meta_tags="'.addslashes($_POST['metatags']).'",Meta_keyword="'.addslashes($_POST['metakeyword']).'",Modified_dt=now(),Article_Title="'.$_POST['urltit'].'" where id="'.$id2.'"');
+							$response['success']=true;
+							$this->editartical_aut();
+						}
+					}
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		/*This is to delete article.Once deleted redirect to the article page*/
+		function deletearticle()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['id']))
+			{
+				$id2=base64_decode($_POST['id']);
+				$this->ScNewsletterSubscriber->query('DELETE FROM sc_articles WHERE Id="'.$id2.'"');
+				$response['success']=true;
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+
+		}
+
+		function displayleads()
+	    {
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->layout='adashboard';
+			/* If no POST values display all the leads */
+			if(!$_POST)
+			{
+				$this->paginate['ScLeadformLabel'] = array('limit' => 50,'order' => array('ScLeadformLabel.Position' => 'asc'));
+				$leadLabels = $this->paginate('ScLeadformLabel');
+				$this->set('lead_labels',$leadLabels);
+			}
+
+			/* If POST values start Adding, Editing and Deleting Labels */
+			if($_POST)
+			{
+				$uri = $_SERVER['REQUEST_URI'];
+				$pos = strpos($uri,"page");
+				if($pos !== false)
+				{
+					$this->paginate['ScLeadformLabel'] = array('limit' => 50,'order' => array('ScLeadformLabel.Field' => 'asc'));
+					$leadLabels = $this->paginate('ScLeadformLabel');
+					$this->set('lead_labels',$leadLabels);
+					//$this->render('refresh');	
+				}
+				else
+				{
+					/* Start Edit Lead Functionality */
+					if($_POST['flag'] == "edit")
+					{
+							$this->layout='ajax';
+							$this->autoRender=false;
+							$this->autoLayout=false;
+							$response = array();
+							$options = array();
+							$option = array();
+							$sql="update sc_leadform_labels set Field='".ucwords($_POST['name'])."', Type='".$_POST['type']."', Position='".$_POST['pos']."', Modified_dt=now() where Id='".$_POST['EdtdId']."'";
+							$this->ScLeadformLabel->query($sql);
+
+							if($_POST['type'] === "select")
+							{
+								$options = explode(",",$_POST['Edtdoptons']);
+							}
+							else if($_POST['type'] == "radio")
+							{
+								$option = explode(",",$_POST['Edtdoptons']);
+								$first = "radio_".ucfirst($option['0']);
+								$second = "radio_".ucfirst($option['1']);
+								array_push($options,$first,$second);
+							}
+
+							/* update sc_leadform_sublabels */
+							if($_POST['EdtdType'] === "select" || $_POST['EdtdType'] === "radio")
+							{
+								$optns = $this->ScLeadformSublabel->query("SELECT Sublabel_values FROM sc_leadform_sublabels where SC_LF_Id = '".$_POST['EdtdId']."'");
+
+								if($_POST['type'] === "select" || $_POST['type'] === "radio")
+								{
+									//case 1
+									for($i=0;$i<count($optns);$i++)
+									{
+										$delsql = "delete from sc_leadform_sublabels where SC_LF_Id='".$_POST['EdtdId']."'";
+										$this->ScLeadformSublabel->query($delsql);
+									}
+									
+									for($i=0;$i<sizeof($options);$i++)
+									{
+										$subsql1 = "insert into sc_leadform_sublabels(SC_LF_Id,Sublabel_values,Created_dt,Modified_dt) values('".$_POST['EdtdId']."','".$options[$i]."',now(),now())";
+										$this->ScLeadformSublabel->query($subsql1);
+									}
+								}
+								else
+								{
+										$delsql2 = "delete from sc_leadform_sublabels where SC_LF_Id='".$_POST['EdtdId']."'";
+										$this->ScLeadformSublabel->query($delsql2);
+								}
+							}
+							elseif($_POST['EdtdType'] !== "select")
+							{
+								if($_POST['type'] === "select" || $_POST['type'] === "radio")
+								{
+									//case 3
+									for($i=0;$i<sizeof($options);$i++)
+									{
+										$subsql3 = "insert into sc_leadform_sublabels(SC_LF_Id,Sublabel_values,Created_dt,Modified_dt) values('".$_POST['EdtdId']."','".$options[$i]."',now(),now())";
+										$this->ScLeadformSublabel->query($subsql3);
+									}
+								}
+								else
+								{
+									//case 4
+									//No Updation
+								}
+							}
+							
+							/* Start - Edit the column name in SC_LEADS_EXTENDS table */
+							$cols = "desc sc_leads_extends";
+							$colDetails = $this->ScLeadsExtend->query($cols);
+						
+							$pos = strpos($_POST['name'], " ");			
+							if($pos !== "")
+							{
+								$newField = explode(" ", ucwords($_POST['name']));
+							}
+							$underscoreField = implode("_", $newField);
+
+							for($i=2;$i<sizeof($colDetails);$i++)
+							{
+								//echo $colDetails[$i]['COLUMNS']['Field']; echo "<br>";
+								//echo $_POST['Oldname'];echo "<br>";
+								$postn = strpos($colDetails[$i]['COLUMNS']['Field'], "_");	
+								if($postn != "")
+								{
+									$newColField = explode("_", ucwords($colDetails[$i]['COLUMNS']['Field']));
+									$colField = implode(" ", $newColField);
+								}
+								else
+								{
+									$colField = $colDetails[$i]['COLUMNS']['Field'];
+								}
+								
+								if($colField === $_POST['Oldname'])
+								{
+									//alter the column name
+									$chngCol = "ALTER TABLE sc_leads_extends Change ".$colDetails[$i]['COLUMNS']['Field']." ".$underscoreField." varchar(50)";
+									$this->ScLeadsExtend->query($chngCol);				
+									$chngDflt = "ALTER TABLE sc_leads_extends MODIFY ".$underscoreField." varchar(50) Default ".$_POST['active']."";
+									$this->ScLeadsExtend->query($chngDflt);
+								}
+							}
+							/* End - Edit the column name in SC_LEADS_EXTENDS table */
+							$pageRefreshed = $_POST['pageRefreshed'];
+							$pagearray = explode(":",$pageRefreshed);
+							$pageNo = $pagearray[1];
+
+							$this->paginate['ScLeadformLabel'] = array('page' => $pageNo, 'limit' => 50,'order' => array('ScLeadformLabel.Position' => 'asc'));
+							$leadLabels = $this->paginate('ScLeadformLabel');
+							$this->set('lead_labels',$leadLabels);
+							$this->render('refresh');			
+					 }
+					 /* End Edit Label Functionality */
+
+					 /* Start Of Add Label Functionality */
+					 elseif($_POST['flag'] == "add")
+					 {
+							$this->layout='ajax';
+							$this->autoRender=false;
+							$this->autoLayout=false;
+							$response = array();
+							$options = array();
+							$newField = array();
+							$option = array();
+							
+							if($_POST['field_type'] == "select")
+							{
+								$options = explode(",",$_POST['optons']);
+							}
+							else if($_POST['field_type'] == "radio")
+							{
+								$option = explode(",",$_POST['optons']);
+								$first = "radio_".ucfirst($option['0']);
+								$second = "radio_".ucfirst($option['1']);
+								array_push($options,$first,$second);
+							}
+							$Pquery = "insert into sc_leadform_labels(Field,Type,Position,Isactive,Layout,Created_dt,Modified_dt) values('".ucwords($_POST['field_name'])."','".$_POST['field_type']."','".$_POST['field_pos']."','0','',now(),now())";   
+
+							$parentQ = $this->ScLeadformLabel->query($Pquery);
+									
+							if(isset($options))
+							{
+								$maxIdQuery = "SELECT MAX(Id) as LastInsertdId FROM sc_leadform_labels";
+								$id = $this->ScLeadformLabel->query($maxIdQuery);
+
+								$field_id = $id['0']['0']['LastInsertdId'];
+
+								for($i=0;$i<sizeof($options);$i++)
+								{
+									$childquery = "insert into sc_leadform_sublabels(SC_LF_Id,Sublabel_values,Created_dt,Modified_dt) values('".$field_id."','".$options[$i]."',now(),now())";
+									$this->ScLeadformSublabel->query($childquery);
+								}
+							}
+							//ALTER TABLE sc_leads_extends ADD abc varchar(50); 
+							if($_POST['field_active'] == "1")
+							{	
+								$pos = strpos($_POST['field_name'], " ");	
+								if($pos !== "")
+								{
+									$newField = explode(" ", ucwords($_POST['field_name']));
+								}
+								$underscoreField = implode("_", $newField);
+								$altQuery = "ALTER TABLE sc_leads_extends ADD ".$underscoreField." varchar(50) DEFAULT '1'";
+								$this->ScLeadsExtend->query($altQuery);
+							}
+							else if($_POST['field_active'] == "0")
+							{
+								$pos = strpos($_POST['field_name'], " ");		
+								if($pos !== "")
+								{
+									$newField = explode(" ", ucwords($_POST['field_name']));
+								}
+								$underscoreField = implode("_", $newField);
+
+								$altQuery = "ALTER TABLE sc_leads_extends ADD ".$underscoreField." varchar(50) DEFAULT '0'";
+								$this->ScLeadsExtend->query($altQuery);
+							}
+							$pageRefreshed = $_POST['pageRefreshed'];
+							$pagearray = explode(":",$pageRefreshed);
+							$pageNo = $pagearray[1];
+
+							$this->paginate['ScLeadformLabel'] = array('page' => $pageNo, 'limit' => 50,'order' => array('ScLeadformLabel.Position' => 'asc'));
+							$leadLabels = $this->paginate('ScLeadformLabel');
+							$this->set('lead_labels',$leadLabels);
+							$this->render('refresh');	
+					 }
+					 /* End Of Add Label Functionality */
+
+					 /* Start Of Delete Label Functionality */
+					 elseif($_POST['flag'] == "delete")
+					 { 
+							$this->layout='ajax';
+							$this->autoRender=false;
+							$this->autoLayout=false;
+							$pagearray = array();
+							if($_POST['id'] !== "" && $_POST['type'] !== "")
+							{
+								$query = "delete from sc_leadform_labels where Id='".$_POST['id']."'";
+								$result = $this->ScLeadformLabel->query($query);
+
+								if($_POST['type'] === "select")
+								{
+									$subquery = "delete from sc_leadform_sublabels where SC_LF_Id='".$_POST['id']."'";
+									$result = $this->ScLeadformSublabel->query($subquery);
+								}
+							}
+							/* Delete the column name in SC_LEADS_EXTENDS table */
+							$cols = "desc sc_leads_extends";
+							$colDetails = $this->ScLeadsExtend->query($cols);
+
+							/* Change the field with space between each word to underscore */
+							$pos = strpos($_POST['name'], " ");			
+							if($pos !== "")
+							{
+								$newField = explode(" ", $_POST['name']);
+							}
+							$underscoreField = implode("_", $newField);
+							/* Change the field with space between each word to underscore */
+
+							for($i=2;$i<sizeof($colDetails);$i++)
+							{
+								if($colDetails[$i]['COLUMNS']['Field'] === $underscoreField)
+								{
+									//alter the column name
+									$delCol = "ALTER TABLE sc_leads_extends DROP COLUMN ".$underscoreField."";
+									$this->ScLeadsExtend->query($delCol);
+									//ALTER TABLE table_name DROP COLUMN column_name
+									//array_push($reqColNames, $colDetails[$i]['COLUMNS']['Field']);		
+								}
+							}
+							/* Delete the column name in SC_LEADS_EXTENDS table */
+							$pageRefreshed = $_POST['pageRefreshed'];
+							$pagearray = explode(":",$pageRefreshed);
+							$pageNo = $pagearray[1];
+
+							$this->paginate['ScLeadformLabel'] = array('page' => $pageNo, 'limit' => 50,'order' => array('ScLeadformLabel.Position' => 'asc'));
+							$leadLabels = $this->paginate('ScLeadformLabel');
+							//$leadLabels = $this->ScLeadformLabel->query("select * from sc_leadform_labels order by Position");
+							$this->set('lead_labels',$leadLabels);
+							$this->render('refresh');
+					 }
+					/* End Of Delete Label Functionality */
+				}
+			}
+		}
+
+		function addleads()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response = array();
+			$options = array();
+			$newField = array();
+			
+			if($_POST['field_type'] == "select")
+			{
+				$options = explode(",",$_POST['optons']);
+			}
+			
+			$Pquery = "insert into sc_leadform_labels(Field,Type,Position,Isactive,Layout,Created_dt,Modified_dt) values('".ucwords($_POST['field_name'])."','".$_POST['field_type']."','".$_POST['field_pos']."','".$_POST['field_active']."','',now(),now())";   
+
+			$parentQ = $this->ScLeadformLabel->query($Pquery);
+					
+			if(isset($options))
+			{
+				$maxIdQuery = "SELECT MAX(Id) as LastInsertdId FROM sc_leadform_labels";
+				$id = $this->ScLeadformLabel->query($maxIdQuery);
+
+				$field_id = $id['0']['0']['LastInsertdId'];
+
+				for($i=0;$i<sizeof($options);$i++)
+				{
+					$childquery = "insert into sc_leadform_sublabels(SC_LF_Id,Sublabel_values,Created_dt,Modified_dt) values('".$field_id."','".$options[$i]."',now(),now())";
+					$this->ScLeadformSublabel->query($childquery);
+				}
+			}
+            //ALTER TABLE sc_leads_extends ADD abc varchar(50); 
+			if($_POST['field_active'] == "1")
+			{	
+				$pos = strpos($_POST['field_name'], " ");	
+				if($pos !== "")
+				{
+					$newField = explode(" ", ucwords($_POST['field_name']));
+				}
+				$underscoreField = implode("_", $newField);
+
+				//$altQuery = "ALTER TABLE sc_leads_extends ADD ".$_POST['field_name']." varchar(50)";
+				$altQuery = "ALTER TABLE sc_leads_extends ADD ".$underscoreField." varchar(50) DEFAULT '1'";
+				$this->ScLeadsExtend->query($altQuery);
+			}
+			else if($_POST['field_active'] == "0")
+			{
+				$pos = strpos($_POST['field_name'], " ");		
+				if($pos !== "")
+				{
+					$newField = explode(" ", ucwords($_POST['field_name']));
+				}
+				$underscoreField = implode("_", $newField);
+
+				$altQuery = "ALTER TABLE sc_leads_extends ADD ".$underscoreField." varchar(50) DEFAULT '0'";
+				$this->ScLeadsExtend->query($altQuery);
+			}
+			$this->paginate['ScLeadformLabel'] = array('limit' => 50,'order' => array('ScLeadformLabel.Field' => 'asc'));
+			$leadLabels = $this->paginate('ScLeadformLabel');
+		    $this->set('lead_labels',$leadLabels);
+			$this->render('refresh');	
+		}
+
+		function getleads()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+
+			if(!empty($_POST['id']))
+			{
+				$response = array();
+				$id = $_POST['id'];
+				$sql = "select * from sc_leadform_labels where Id='".$id."'";
+				$result = $this->ScLeadformLabel->query($sql);
+				$response['Id'] = $result[0]['sc_leadform_labels']['Id'];
+				$response['Field'] = $result[0]['sc_leadform_labels']['Field'];
+				$response['Type'] = $result[0]['sc_leadform_labels']['Type'];
+				$response['Position'] = $result[0]['sc_leadform_labels']['Position'];
+				$response['Isactive'] = $result[0]['sc_leadform_labels']['Isactive'];
+			}
+			header('Content-Type: application/json');
+			echo(json_encode($response));
+		}
+
+		function getOptions()
+		{
+			$query = "select Id, Sublabel_values from sc_leadform_sublabels where SC_LF_Id='".$_POST['id']."'";
+			$result = $this->ScLeadformSublabel->query($query);
+			$optns = array();
+			$subvalues = array();
+			$id = array();
+			$apnd = "";
+			$opt = "";
+			foreach($result as $sub)
+			{
+				$subvalues = $sub['sc_leadform_sublabels'];
+				$pos1 = strpos($subvalues["Sublabel_values"],"radio");
+				if($pos1 !== false)
+				{
+					$pos2 = strpos($subvalues["Sublabel_values"],"_");
+					if($pos2 !== false)
+					{
+						$optVal = substr($subvalues["Sublabel_values"], $pos2+1);
+					}
+				}
+				else
+				{
+					$optVal = $subvalues['Sublabel_values'];
+				}
+				$optId = $subvalues['Id'];			
+				$apnd .= "<option value=$optVal>$optVal</option>";
+				$opt .= $optVal.",";
+			}
+			$opt = substr($opt, 0, strlen($opt)-1); 
+			echo json_encode(array("fulltag" => $apnd, "optons" => $opt));
+			exit();		
+		}
+
+		function editleads()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response = array();
+			$options = array();
+
+		    $sql="update sc_leadform_labels set Field='".ucwords($_POST['name'])."', Type='".$_POST['type']."', Position='".$_POST['pos']."', Layout='".$_POST['lyt']."', Isactive='".$_POST['active']."', Modified_dt=now() where Id='".$_POST['EdtdId']."'";
+			$this->ScLeadformLabel->query($sql);
+
+			if($_POST['type'] === "select" || $_POST['type'] === "radio")
+			{
+				$options = explode(",",$_POST['Edtdoptons']);
+			}
+
+			/* update sc_leadform_sublabels */
+			if($_POST['EdtdType'] === "select" || $_POST['EdtdType'] === "radio")
+			{
+				$optns = $this->ScLeadformSublabel->query("SELECT Sublabel_values FROM sc_leadform_sublabels where SC_LF_Id = '".$_POST['EdtdId']."'");
+
+				if($_POST['type'] === "select" || $_POST['type'] === "radio")
+				{
+					//case 1
+					for($i=0;$i<count($optns);$i++)
+					{
+						$delsql = "delete from sc_leadform_sublabels where SC_LF_Id='".$_POST['EdtdId']."'";
+						$this->ScLeadformSublabel->query($delsql);
+					}
+					
+					for($i=0;$i<sizeof($options);$i++)
+					{
+						$subsql1 = "insert into sc_leadform_sublabels(SC_LF_Id,Sublabel_values,Created_dt,Modified_dt) values('".$_POST['EdtdId']."','".$options[$i]."',now(),now())";
+						$this->ScLeadformSublabel->query($subsql1);
+					}
+				}
+				else
+				{
+					
+						$delsql2 = "delete from sc_leadform_sublabels where SC_LF_Id='".$_POST['EdtdId']."'";
+						$this->ScLeadformSublabel->query($delsql2);
+					
+				}
+			}
+			elseif($_POST['EdtdType'] !== "select")
+			{
+				if($_POST['type'] === "select" || $_POST['type'] === "radio")
+				{
+					//case 3
+					for($i=0;$i<sizeof($options);$i++)
+					{
+						$subsql3 = "insert into sc_leadform_sublabels(SC_LF_Id,Sublabel_values,Created_dt,Modified_dt) values('".$_POST['EdtdId']."','".$options[$i]."',now(),now())";
+						$this->ScLeadformSublabel->query($subsql3);
+					}
+				}
+				else
+				{
+					//case 4
+					//No Updation
+				}
+			}
+			
+			/* Start - Edit the column name in SC_LEADS_EXTENDS table */
+			$cols = "desc sc_leads_extends";
+			$colDetails = $this->ScLeadsExtend->query($cols);
+		
+			$pos = strpos($_POST['name'], " ");			
+			if($pos !== "")
+			{
+				$newField = explode(" ", ucwords($_POST['name']));
+			}
+			$underscoreField = implode("_", $newField);
+
+			for($i=2;$i<sizeof($colDetails);$i++)
+		    {
+				//echo $colDetails[$i]['COLUMNS']['Field']; echo "<br>";
+				//echo $_POST['Oldname'];echo "<br>";
+				$postn = strpos($colDetails[$i]['COLUMNS']['Field'], "_");	
+				if($postn != "")
+				{
+					$newColField = explode("_", ucwords($colDetails[$i]['COLUMNS']['Field']));
+					$colField = implode(" ", $newColField);
+				}
+				else
+				{
+					$colField = $colDetails[$i]['COLUMNS']['Field'];
+				}
+				
+				if($colField === $_POST['Oldname'])
+				{
+					//alter the column name
+					$chngCol = "ALTER TABLE sc_leads_extends Change ".$colDetails[$i]['COLUMNS']['Field']." ".$underscoreField." varchar(50)";
+					$this->ScLeadsExtend->query($chngCol);				
+					$chngDflt = "ALTER TABLE sc_leads_extends MODIFY ".$underscoreField." varchar(50) Default ".$_POST['active']."";
+					$this->ScLeadsExtend->query($chngDflt);
+				}
+		    }
+			/* End - Edit the column name in SC_LEADS_EXTENDS table */
+
+			$this->paginate['ScLeadformLabel'] = array('limit' => 8,'order' => array('ScLeadformLabel.Field' => 'asc'));
+			$leadLabels = $this->paginate('ScLeadformLabel');
+		    $this->set('lead_labels',$leadLabels);
+			$this->render('refresh');			
+		}
+
+		function delLead()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			if($_POST['id'] !== "" && $_POST['type'] !== "")
+			{
+				$query = "delete from sc_leadform_labels where Id='".$_POST['id']."'";
+				$result = $this->ScLeadformLabel->query($query);
+
+				if($_POST['type'] === "select")
+				{
+					$subquery = "delete from sc_leadform_sublabels where SC_LF_Id='".$_POST['id']."'";
+					$result = $this->ScLeadformSublabel->query($subquery);
+				}
+			}
+			/* Delete the column name in SC_LEADS_EXTENDS table */
+			$cols = "desc sc_leads_extends";
+			$colDetails = $this->ScLeadsExtend->query($cols);
+
+			/* Change the field with space between each word to underscore */
+			$pos = strpos($_POST['name'], " ");			
+			if($pos !== "")
+			{
+				$newField = explode(" ", $_POST['name']);
+			}
+			$underscoreField = implode("_", $newField);
+			/* Change the field with space between each word to underscore */
+
+			for($i=2;$i<sizeof($colDetails);$i++)
+		    {
+				if($colDetails[$i]['COLUMNS']['Field'] === $underscoreField)
+				{
+					//alter the column name
+					$delCol = "ALTER TABLE sc_leads_extends DROP COLUMN ".$underscoreField."";
+					$this->ScLeadsExtend->query($delCol);
+					//ALTER TABLE table_name DROP COLUMN column_name
+					//array_push($reqColNames, $colDetails[$i]['COLUMNS']['Field']);		
+				}
+		    }
+			/* Delete the column name in SC_LEADS_EXTENDS table */
+
+			$this->paginate['ScLeadformLabel'] = array('limit' => 8,'order' => array('ScLeadformLabel.Field' => 'asc'));
+			$leadLabels = $this->paginate('ScLeadformLabel');
+		    $this->set('lead_labels',$leadLabels);
+			$this->render('refresh');
+		}
+
+		function changeActiveStatus()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response = array();
+
+			/* Change the field with space between each word to underscore */
+			$field = $_POST['Field'];
+			$pos = strpos($_POST['Field'], " ");			
+			if($pos !== "")
+			{
+				$newField = explode(" ", $_POST['Field']);
+			}
+			$underscoreField = implode("_", $newField);
+			/* Change the field with space between each word to underscore */
+
+			$fieldsFixed = array("Name","Email","Choose Password", "Retype Password", "Telephone", "I am over 13 years of age", "I understand and agree to the Privacy Policy", "Submit this request to the following similar local providers", "Loved One's Name", "Their Age", "Gender", "Location of Interest", "Phone", "Currently Residing", "Decision Timeframe", "I'm The Loved One's", "Questions comments");
+				
+			if($_POST['activeStatus'] == "1")
+			{
+				$query = "update sc_leadform_labels set Isactive=0 where Id='".$_POST['Id']."'";	
+				$this->ScLeadformLabel->query($query);
+
+				if(!in_array($field,$fieldsFixed))
+				{
+					//alter table, Drop Column
+					//$altQuery = "ALTER TABLE sc_leads_extends DROP COLUMN ".$field."";
+					$altQuery = "ALTER TABLE sc_leads_extends ALTER ".$underscoreField." SET Default '0'";
+					//echo $_POST['activeStatus']."---".$altQuery;
+					$this->ScLeadsExtend->query($altQuery);
+				}			
+				$response['status'] = "0";
+			}
+			else
+			{
+				$query = "update sc_leadform_labels set Isactive=1 where Id='".$_POST['Id']."'";
+				$this->ScLeadformLabel->query($query);
+
+				if(!in_array($field,$fieldsFixed))
+				{
+					//alter table, ADD Column
+					//$altQuery = "ALTER TABLE sc_leads_extends ADD ".$field." varchar(50)";
+					$altQuery = "ALTER TABLE sc_leads_extends ALTER ".$underscoreField." SET Default '1'";
+					//echo $_POST['activeStatus']."---".$altQuery;
+					$this->ScLeadsExtend->query($altQuery);
+				}
+				$response['status'] = "1";
+			}			
+			header('Content-Type: application/json');
+			echo(json_encode($response));
+		}
+
+		function show_articles()
+		{
+			$this->layout='articlecare';
+			$fetcharticles = "select * from sc_articles";
+			$articles = $this->ScArticle->query($fetcharticles);
+
+			$this->paginate = array('limit' => 8,'order' => array('ScArticle.Id' => 'desc'));		
+			
+			$data = $this->paginate('ScArticle');
+			$this->set('articles',$data); 
+
+			$fetchcat = "select * from sc_article_categories order by sc_article_categories.Id desc";
+			$categories = $this->ScArticleCategorie->query($fetchcat);
+			$this->set('categories',$categories); 
+			$fetcharticlef = "select Id,Title,Article_Title from sc_articles where Categories_Id='32' and SubCategories_Id='0'";
+			$articlef = $this->ScArticle->query($fetcharticlef);
+			$this->set('articlef',$articlef);
+			$fetcharticlerating = "select ROUND(AVG(Article_Rating)) as rating,Article_Id from sc_article_ratings group by Article_Id";
+			$articlerat = $this->ScArticle->query($fetcharticlerating);
+			//echo'<pre>';var_dump($articlerat);echo'</pre>';
+			$this->set('articlerat',$articlerat);
+		}
+
+		function detail_article($id)
+		{
+			if($this->Session->read("email"))
+			{
+				$this->Session->write('menu','yes');
+				if($this->Session->read('flag') == "1")
+				{
+					$this->layout='seniorSearchHeader';
+				}
+				elseif($this->Session->read('flag') == "2")
+				{
+					$this->layout='seniorStateHeader';
+				}
+				elseif($this->Session->read('flag') == "3")
+				{
+					$this->Session->write('step','two');
+					$this->layout='seniorStateHeader';
+				}
+			}
+			else
+			{
+				$this->layout='seniorIndexHeader';
+			}		
+			$datarea=urldecode($id);
+			$fetcharticles = "select * from sc_articles where Article_Title='".$datarea."'";
+			
+			$articles = $this->ScArticle->query($fetcharticles);
+			$this->set('articles',$articles); 
+			$fetcharticlef = "select Id,Title,Article_Title from sc_articles where Categories_Id='0' and SubCategories_Id='0'";
+			$articlef = $this->ScArticle->query($fetcharticlef);
+			$this->set('articlef',$articlef);
+			$startrating=$this->ScArticle->query('select ROUND(AVG(Article_Rating)) as rateme from sc_article_ratings where Article_Id="'.$articles['0']['sc_articles']['Id'].'"');
+			$this->set('starrating',$startrating[0][0]['rateme']);
+			$this->set('title',$articles['0']['sc_articles']['Id']);
+			$this->set('titlepage',$articles[0]['sc_articles']['Title']);
+			$this->set('metatag',$articles[0]['sc_articles']['Meta_tags']);
+			$this->set('metakeword',$articles[0]['sc_articles']['Meta_keyword']);
+		}
+
+		function search_seniorcare()
+		{
+			$this->set('msg', '');
+			$this->Session->write('cityArray','');
+			$json = array();
+			$construct["markers"] = array();
+
+			$service = array();
+			$services = array();
+			$providers = array();
+			$prov_nums = array();
+			$searchService = array();
+			$cities = array();
+			$query = "";
+
+			$argument = array();
+			//print_r($this->params['url']); echo "<br>";
+			$argument = $this->params['pass']; 
+			if(!empty($argument))
+			{
+				$this->Session->destroy(); 
+				$searchCityKey = $argument['0'];
+				$this->Session->write('key',$searchCityKey);
+
+				$query = "select Provider_Number from sc_providers_masters where State='".$searchCityKey."'";
+				$prov_nums = $this->ScArticle->query($query);
+				$totalproviders = count($prov_nums);
+				
+				/* List cities for Google Map */
+					$city_search = "select City from sc_providers_masters where State='".$searchCityKey."' ORDER BY Nursing_Home_Name DESC LIMIT 0, 10";
+					$getcities = $this->ScArticle->query($city_search);
+				
+					foreach($getcities as $city)
+					{
+						$cityname = $city['sc_providers_masters']['City'];
+						array_push($cities,$cityname);
+					}
+					
+					$cities = array_unique($cities);
+					$cities = array_values($cities);
+					
+					$this->Session->write('multiple','yes');
+					$this->Session->write('cityArray',$cities);		
+			   /* List cities for Google Map */
+			}
+			else
+			{
+				if(!empty($_POST))
+				{
+					$this->Session->destroy(); 
+					$type = $_POST['multiple_selection'];
+					$this->Session->write('type',$type);
+
+					if($type == "no")
+					{
+						if($_POST["searchkey"] != "")
+						{
+							$key = $_POST["searchkey"];
+							$this->Session->write('key',$key);
+						}
+					}
+					else
+					{
+						if($_POST["searchkey"] != "")
+						{
+							$key = $_POST["searchkey"];
+							$this->Session->write('key',$key);
+						}
+						if(!empty($_POST['checkbox']))
+						{
+							$this->Session->write('checkbox','true');
+
+							$service = array_keys($_POST['checkbox']);
+							for($i=0;$i<count($service);$i++)
+							{
+								$tmp = '"'.$service[$i].'"';
+								array_push($services,$tmp);
+							}
+							$availServices = implode(",",$services);
+							$this->Session->write('availServices',$availServices);
+						}
+						if($_POST['lower_star'] != "" && $_POST['upper_star'] != "")
+						{
+							$this->Session->write('star','true');
+
+							$lowStar = $_POST['lower_star'];
+							$upStar  = $_POST['upper_star'];
+							$this->Session->write('lowStar',$lowStar);
+							$this->Session->write('upStar',$upStar);
+						}
+					}
+				}
+				else
+				{
+					$type = $this->Session->read('type');
+
+					if($this->Session->read('key')!= "")
+					{	
+						$key = $this->Session->read('key');
+					}
+					if($this->Session->read('checkbox') == "true")
+					{	
+						$availServices = $this->Session->read('availServices');
+					}
+					if($this->Session->read('star') == "true")
+					{	
+						$lowStar = $this->Session->read('lowStar');
+						$upStar = $this->Session->read('upStar');
+					}
+				}
+						
+				/* Start forming the query from here*/	
+				if($type == "yes")
+				{	
+					if(isset($_POST["searchkey"]))
+					{
+						$key = $_POST["searchkey"];
+					}
+
+					$query = "select Provider_Number,City from sc_providers_masters where (Nursing_Home_Name LIKE '".$key."%' OR Street LIKE '".$key."%' OR City LIKE '".$key."%' OR State='".$key."' OR Zip_Code LIKE '".$key."%' OR Phone_Number LIKE '".$key."%' OR Services LIKE '".$key."%')";
+					if(!empty($availServices))
+					{			
+						$query .= " AND Services IN(".$availServices.")";
+					}
+					
+					if($this->Session->read('star') == "true")
+					{
+						$query .= " AND Overall_Star_Rating BETWEEN ".$lowStar." AND ".$upStar;
+					}
+					//echo $query;
+					$prov_nums = $this->ScArticle->query($query);
+					$totalproviders = count($prov_nums);
+					$this->Session->write('prov_nums',$prov_nums);
+
+				}
+				elseif($type == "no")
+				{		
+					if(isset($_POST["searchkey"]))
+					{
+						$key = $_POST["searchkey"];
+					}
+
+					$sql = "select Provider_Number,City from sc_providers_masters where Nursing_Home_Name LIKE '".$key."%' OR Street LIKE '".$key."%' OR City LIKE '".$key."%' OR State='".$key."' OR Zip_Code LIKE '".$key."%' OR Phone_Number LIKE '".$key."%' OR Services LIKE '".$key."%'";
+					$prov_nums = $this->ScArticle->query($sql);
+					$totalproviders = count($prov_nums);
+				}
+
+				/* List cities for Google Map */
+					$city_search = "select City from sc_providers_masters where Nursing_Home_Name LIKE '".$key."%' OR Street LIKE '".$key."%' OR City LIKE '".$key."%' OR State='".$key."' OR Zip_Code LIKE '".$key."%' OR Phone_Number LIKE '".$key."%' OR Services LIKE '".$key."%' ORDER BY Nursing_Home_Name DESC LIMIT 0, 10";
+					$getcities = $this->ScArticle->query($city_search);
+				
+					foreach($getcities as $city)
+					{
+						$cityname = $city['sc_providers_masters']['City'];
+						array_push($cities,$cityname);
+					}
+					
+					$cities = array_unique($cities);
+					$cities = array_values($cities);
+					
+					$this->Session->write('multiple','yes');
+					$this->Session->write('cityArray',$cities);		
+			   /* List cities for Google Map */
+
+		  }
+
+			
+
+			if(!empty($prov_nums))
+			{
+				foreach($prov_nums as $nums)
+				{
+					$temp = "'".$nums['sc_providers_masters']['Provider_Number']."'";
+					array_push($providers,$temp);
+				}
+
+				$provIds = implode(",",$providers);	
+				
+				$this->paginate['ScProvidersMaster'] = array('limit' => 10,
+									   'order' => array('ScProvidersMaster.Nursing_Home_Name ASC'),
+									   'conditions' => 'ScProvidersMaster.Provider_Number in ('.$provIds.')');
+				$providers = $this->paginate('ScProvidersMaster');
+				$this->set('result',$providers);  
+				$this->set('totalproviders',$totalproviders);  
+			}
+			else
+			{
+				$this->set('result','');  
+				$this->set('totalproviders',"");  
+				$this->set('msg','No Records Found');  
+			}
+	
+			$latest_article=$this->ScArticle->query("select Id,Title from sc_articles limit 8");			
+			$this->set('latest_article',$latest_article);			
+			$this->set('keyword',$this->Session->read('key'));
+
+			$this->layout='seniorsearch';		
+		}
+		
+		function searchdetail($id)
+		{		
+			$query = "update sc_providers_masters set Modified_dt=now() where Provider_Number='".$id."'";
+			$this->ScProvidersMaster->query($query);
+
+			$result = $this->ScProvidersMaster->query("CALL provider_list_new('$id')");
+
+			$title  = strtolower($result['0']['0']['Nursing_Home_Name']);
+			$title  = ucwords($title);
+			$services  = strtolower($result['0']['0']['Services']);
+			$services  = ucwords($services);
+			$street = strtolower($result['0']['0']['Street']);
+			$street  = ucwords($street);
+			$city   = strtolower($result['0']['0']['City']);
+			$city  = ucwords($city);
+			$state  = $result['0']['0']['State'];
+			$phone  = $result['0']['0']['Phone_Number'];
+			$rating = $result['0']['0']['Overall_Star_Rating'];
+			$zipcode = $result['0']['0']['Zip_Code'];
+			$payment = $result['0']['0']['Program_Participation'];
+
+			/* Set the data in the seesion for displaying in Google Map */
+			$this->Session->write('multiple','no');
+			$this->Session->write('title',$title);
+			$this->Session->write('street',$street);
+			$this->Session->write('city',$city);
+			$this->Session->write('state',$state);
+			$this->Session->write('zipcode',$zipcode);
+			$this->Session->write('services',$services);
+			$this->Session->write('rating',$rating);
+			$this->Session->write('payment',$payment);
+
+			$subquery = "select Provider_Number, Nursing_Home_Name, City, State, Program_Participation, Overall_Star_Rating from sc_providers_masters where City LIKE '%".$city."%' LIMIT 0, 8";
+			$similar = $this->ScArticle->query($subquery);
+
+			$this->set('title',$title);
+			$this->set('street',$street);
+			$this->set('city',$city);
+			$this->set('state',$state);
+			$this->set('phone',$phone);
+			$this->set('rating',$rating);
+			$this->set('zipcode',$zipcode);
+			$this->set('services',$services);
+			$this->set('result',$result);
+
+			$this->set('similar',$similar);
+			$this->layout='seniorcarela';
+		}
+
+		/*This is to add articles for the tab like Alzheimer's Care and all those categories in the home tab*/
+		function frontendarticle()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+		}
+		//This is to load the 
+		function alzheimercare()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='alzheimercare'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+
+		}
+		/*This is to save the alzheimercare article*/
+		function submitmenu()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['alzheimercare']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['alzheimercare'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['alzheimercare'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+				
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		/*This function is to load the assistedliving ctp file*/
+		function assistedliving()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='assistedliving'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+
+		}
+		
+		/*This is to save the assistedliving data*/
+		function submitassistedliving()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['assistedliving']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['assistedliving'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['assistedliving'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		/*This is for the homecare listing*/
+		function homecare()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='homecare'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+
+		}
+		/*This is submit home care function to insert update the rows*/
+		function submithomecare()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['homecare']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['homecare'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['homecare'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+
+		/*This is for the nursinghome page to show*/
+		function nursinghome()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='nursinghome'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+
+		}
+		/*This is submit home care function to insert update the rows*/
+		function submitnursinghome()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['nursinghome']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['nursinghome'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['nursinghome'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		/*This is residentialcarehome to show the tinymce*/
+		function residentialcarehome()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='residentialcarehome'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+		}
+		/*This is submit home care function to insert update the rows*/
+		function submitresidentialcarehome()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['residentialcarehome']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['residentialcarehome'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['residentialcarehome'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		//This is fro the retirementcommunitie
+		function retirementcommunitie()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='retirementcommunitie'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+		}
+		/*This is submit home care function to insert update the rows*/
+		function submitretirementcommunitie()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['retirementcommunitie']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['retirementcommunitie'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['retirementcommunitie'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		//This is to load the homearticle
+		function homearticle()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='homearticle'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+		}
+		
+		/*This is submit home care function to insert update the rows*/
+		function submithomearticle()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			if(!empty($_POST['homearticle']))
+			{
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data[0]['sc_menu_cms']['Menu_Content'])==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".addslashes($_POST['fordata'])."','".addslashes($_POST['homearticle'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['homearticle'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		//This is to load the aboutus
+		function aboutus()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='aboutus'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+
+		}
+		
+		/*This is submit aboutus function to insert update the rows*/
+		function submitaboutus()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			
+			if(!empty($_POST['aboutus']))
+			{
+				
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data)==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".$_POST['fordata']."','".addslashes($_POST['aboutus'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['aboutus'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		//This is to load the aboutus
+		function privacy()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='privacy'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+
+		}
+		
+		/*This is submit aboutus function to insert update the rows*/
+		function submitprivacy()
+		{
+			$this->layout='ajax';
+			$this->autoRender=false;
+			$this->autoLayout=false;
+			$response=array('success'=>false);
+			
+			if(!empty($_POST['privacy']))
+			{
+				
+				$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='".$_POST['fordata']."'");
+				if(count($data)==0)
+				{
+					$this->ScArticleCategorie->query("insert into sc_menu_cms(Menu_Cat_Name,Menu_Content,Title,Meta_tags,Meta_keyword,Created_dt,Modified_dt) values('".$_POST['fordata']."','".addslashes($_POST['privacy'])."','".addslashes($_POST['title'])."','".addslashes($_POST['metatags'])."','".addslashes($_POST['metakeyword'])."',now(),now())");
+					$response['success']=true;
+				}
+				else
+				{
+					$this->ScArticleCategorie->query("update sc_menu_cms set Menu_Content='".addslashes($_POST['privacy'])."',Modified_dt=now(),Title='".addslashes($_POST['title'])."',Meta_tags='".addslashes($_POST['metatags'])."',Meta_keyword='".addslashes($_POST['metakeyword'])."' where Menu_Cat_Name='".addslashes($_POST['fordata'])."'");
+					$response['success']=true;
+				}
+			}
+			else
+			{
+				$response['success']=false;
+			}
+			header('content-type:application/json');
+			echo(json_encode($response));
+		}
+		//This is to load the aboutus
+		function faq()
+		{
+			$this->idleTimeOut();
+			$this->admin_authenticate();
+			$this->editartical_aut();
+			$this->layout='adashboard';
+			$data=$this->ScArticleCategorie->query("select * from sc_menu_cms where Menu_Cat_Name='faq'");
+			$this->set('data',$data[0]['sc_menu_cms']['Menu_Content']);
+			$this->set('title',$data[0]['sc_menu_cms']['Title']);
+			$this->set('tag',$data[0]['sc_menu_cms']['Meta_tags']);
+			$this->set('keyword',$data[0]['sc_menu_cms']['Meta_keyword']);
+		}
+	}
+
+?>
